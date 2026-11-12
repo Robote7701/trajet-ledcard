@@ -1,8 +1,10 @@
 # Trajet LED Card 🚗
 
-Carte Home Assistant façon **panneau à messages variables d'autoroute** : temps de trajet en **afficheurs LED**, état du trafic (fluide, ralenti, bouchon) et **feux orange qui clignotent** quand ça bouchonne.
+Carte Home Assistant façon **panneau à messages variables d'autoroute** (ou en **style sobre** qui suit votre thème) : temps de trajet en **afficheurs LED**, état du trafic (fluide, ralenti, bouchon) et **feux orange qui clignotent** quand ça bouchonne.
 
 ![Aperçu](images/preview.png)
+
+![Style sobre, thèmes clair et sombre](images/preview-sober.png)
 
 [![Ouvrir dans HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Robote7701&repository=trajet-ledcard&category=plugin)
 
@@ -42,6 +44,10 @@ Sans temps normal, la carte affiche le temps et la route, sans état du trafic.
 | feux orange | clignotent dès qu'un trajet est ralenti, plus vite en cas de bouchon |
 | `INDISPONIBLE` | le capteur ne répond pas |
 
+**Intensité des LED** réglable (`brightness`), avec une intensité différente la nuit (`night_brightness`, quand le soleil est couché) — pratique sur une tablette murale.
+
+![Intensité des LED](images/preview-brightness.png)
+
 Toucher un trajet ouvre l'historique de son temps. Les textes passent en anglais si Home Assistant est en anglais.
 
 ## 📦 Installation
@@ -70,6 +76,9 @@ type: custom:trajet-ledcard
 title: Trajets du matin          # nom du panneau
 slow_after: 5
 jam_after: 15
+style: autoroute               # ou sobre
+brightness: 100                # intensité des LED (10 à 100 %)
+night_brightness: 40           # la nuit (facultatif)
 routes:
   - name: Bureau
     entity: sensor.waze_bureau
@@ -88,7 +97,10 @@ routes:
 | `routes[].normal` | — | capteur de temps normal, ou nombre de minutes |
 | `slow_after` | `5` | retard (min) à partir duquel c'est « ralenti » |
 | `jam_after` | `15` | retard (min) à partir duquel c'est « bouchon » |
-| `show_beacons` | `true` | afficher les feux clignotants |
+| `show_beacons` | `true` | afficher les feux clignotants (pastille en style sobre) |
+| `style` | `autoroute` | `autoroute` (boîtier métal) ou `sobre` (suit les couleurs du thème, clair ou sombre) |
+| `brightness` | `100` | intensité des LED, de 10 à 100 % |
+| `night_brightness` | — | intensité quand le soleil est couché (`sun.sun`) ; vide = même que `brightness` |
 
 ## ⚠️ Limites
 - Le temps vient du service choisi (Waze, Google…) ; Waze se met à jour toutes les 5 minutes environ.
@@ -121,6 +133,9 @@ title: Morning commute
 slow_after: 5
 jam_after: 15
 show_beacons: true
+style: autoroute       # or sobre (follows your theme)
+brightness: 100        # LED brightness 10–100 %
+night_brightness: 40   # after sunset (optional)
 routes:
   - name: Office
     entity: sensor.waze_office

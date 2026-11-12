@@ -10,6 +10,9 @@
  * slow_after: 5                # retard (min) à partir duquel c'est « ralenti »
  * jam_after: 15                # retard (min) à partir duquel c'est « bouchon »
  * show_beacons: true
+ * style: autoroute             # autoroute | sobre
+ * brightness: 100              # intensité des LED (10 à 100 %)
+ * night_brightness: 40         # intensité quand le soleil est couché (facultatif)
  * routes:
  *   - name: Bureau
  *     entity: sensor.waze_bureau
@@ -25,6 +28,7 @@ const TLC_I18N = {
     f_title: "Nom du panneau", f_routes: "Trajets", f_name: "Nom affiché", f_entity: "Capteur de temps de trajet",
     f_normal: "Capteur de temps normal (facultatif)", f_normal_min: "ou temps normal fixe (min)",
     f_slow: "Ralenti à partir de (min de retard)", f_jam: "Bouchon à partir de (min de retard)", f_beacons: "Feux clignotants",
+    f_style: "Style", f_bright: "Intensité des LED (%)", f_night: "Intensité la nuit (%, vide = pareil)",
   },
   en: {
     title: "Travel time", min: "MIN", via: "VIA", km: "KM", ok: "FLOWING", slow: "SLOW", jam: "JAM",
@@ -32,6 +36,7 @@ const TLC_I18N = {
     f_title: "Sign name", f_routes: "Routes", f_name: "Display name", f_entity: "Travel time sensor",
     f_normal: "Normal time sensor (optional)", f_normal_min: "or fixed normal time (min)",
     f_slow: "Slow from (min of delay)", f_jam: "Jam from (min of delay)", f_beacons: "Flashing beacons",
+    f_style: "Style", f_bright: "LED brightness (%)", f_night: "Night brightness (%, empty = same)",
   },
 };
 const tlcLang = (hass) => ((hass && (hass.locale?.language || hass.language)) || "fr").startsWith("fr") ? "fr" : "en";
@@ -79,6 +84,22 @@ const TLC_STYLE = `
   .foot { display:flex; justify-content:space-between; color:var(--amber); opacity:.8; font-size:11.5px; --dot:1.6px;
     margin-top:4px; }
   .empty { color:var(--off); font-size:14px; padding:10px 0; }
+  .g { opacity:var(--lum, 1); }
+
+  /* ---- style sobre : suit le thème Home Assistant ---- */
+  .sober .housing { background:none; box-shadow:none; border-radius:0; padding:12px 14px 14px; }
+  .sober .hl { position:static; display:flex; align-items:center; gap:8px; text-align:left; margin:0 0 10px;
+    font-family:var(--ha-font-family-body, Roboto, sans-serif); font-size:16px; font-weight:500; letter-spacing:0;
+    text-transform:none; color:var(--primary-text-color); }
+  .sober .hl ha-icon { color:var(--primary-color); --mdc-icon-size:22px; flex:none; }
+  .sober .hl .tt { overflow:hidden; text-overflow:ellipsis; }
+  .pulse { display:none; }
+  .sober .pulse { display:block; width:10px; height:10px; border-radius:50%; margin-left:auto; flex:none; background:var(--divider-color, #888); opacity:.5; }
+  .sober .on .pulse { opacity:1; animation:tlc-pulse 1.1s steps(1) infinite; }
+  .sober .on.b-slow .pulse { background:var(--slow); }
+  .sober .on.b-jam .pulse { background:var(--jam); animation-duration:.6s; }
+  @keyframes tlc-pulse { 50% { opacity:.2; } }
+  .sober .screen { border-radius:10px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), inset 0 2px 8px rgba(0,0,0,.8); }
   @media (max-width:400px) {
     .name { font-size:19px; } .time { font-size:28px; } .state { font-size:15px; } .via { font-size:13px; }
   }
@@ -90,7 +111,7 @@ const tlcM = (txt) => `<span class="g"><span class="m">${txt}</span></span>`;
 
 class TrajetLedCard extends HTMLElement {
   setConfig(config) {
-    const c = { title: "", show_beacons: true, routes: [], ...(config || {}) };
+    const c = { title: "", show_beacons: true, style: "autoroute", brightness: 100, routes: [], ...(config || {}) };
     if (!Array.isArray(c.routes)) c.routes = [];
     const th = Array.isArray(c.thresholds) ? c.thresholds : [];
     c.slow_after = Number(c.slow_after ?? th[0] ?? 5);
@@ -112,7 +133,7 @@ class TrajetLedCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    const sig = tlcLang(hass) + this._config.routes.map((r) => {
+    const sig = tlcLang(hass) + (hass.states["sun.sun"] ? hass.states["sun.sun"].state : "") + this._config.routes.map((r) => {
       const a = r.entity && hass.states[r.entity];
       const b = typeof r.normal === "string" && hass.states[r.normal];
       return (a ? a.state + a.last_updated : "-") + (b ? b.state : String(r.normal ?? "-"));
@@ -189,11 +210,22 @@ class TrajetLedCard extends HTMLElement {
     const src = this._source(data);
     const beacons = this._config.show_beacons !== false;
     const on = beacons && worst !== "ok" ? "on b-" + worst : "";
+    const sober = ["sobre", "sober", "simple"].includes(String(this._config.style).toLowerCase());
+    const sun = this._hass.states["sun.sun"];
+    const night = sun && sun.state === "below_horizon" && Number.isFinite(Number(this._config.night_brightness)) &&
+      this._config.night_brightness !== "" && this._config.night_brightness !== null;
+    let b = Number(night ? this._config.night_brightness : this._config.brightness);
+    b = Math.min(100, Math.max(10, Number.isFinite(b) ? b : 100)) / 100;
+    const k = b * (sober ? 0.55 : 1);
+    const glow = `drop-shadow(0 0 ${(1.5 * b).toFixed(2)}px currentColor) drop-shadow(0 0 3px color-mix(in srgb, currentColor ${Math.round(80 * k)}%, transparent)) drop-shadow(0 0 7px color-mix(in srgb, currentColor ${Math.round(50 * k)}%, transparent))`;
+    const lum = (0.4 + 0.6 * b).toFixed(2);
+    const title = tlcEsc(this._config.title || T.title);
     this.shadowRoot.innerHTML = `<style>${TLC_STYLE}</style>
-      <ha-card style="background:none;box-shadow:none;border:none"><div class="sign">
+      <ha-card${sober ? "" : ' style="background:none;box-shadow:none;border:none"'}><div class="sign${sober ? " sober" : ""}" style="--lum:${lum}">
+        <style>.g { filter:${glow}; }</style>
         <div class="housing ${on}">
-          <div class="hl">${tlcEsc(this._config.title || T.title)}</div>
-          ${beacons ? '<span class="beacon l"></span><span class="beacon r"></span>' : ""}
+          <div class="hl">${sober ? `<ha-icon icon="mdi:car-clock"></ha-icon><span class="tt">${title}</span><span class="pulse"></span>` : title}</div>
+          ${beacons && !sober ? '<span class="beacon l"></span><span class="beacon r"></span>' : ""}
           <div class="screen">
             ${data.length ? data.map((d) => this._row(d, T)).join('<div class="sep"></div>') : `<div class="empty">${tlcEsc(T.none)}</div>`}
             <div class="foot">${tlcM(T.upd + " " + upd)}${src ? tlcM(tlcEsc(src)) : ""}</div>
@@ -226,9 +258,15 @@ class TrajetLedCard extends HTMLElement {
           { name: "jam_after", selector: { number: { min: 1, max: 240, mode: "box" } } },
           { name: "show_beacons", selector: { boolean: {} } },
         ] },
+        { type: "grid", name: "", schema: [
+          { name: "style", selector: { select: { mode: "dropdown", options: [
+            { value: "autoroute", label: "Autoroute" }, { value: "sobre", label: "Sobre / Sober" }] } } },
+          { name: "brightness", selector: { number: { min: 10, max: 100, step: 10, mode: "slider", unit_of_measurement: "%" } } },
+          { name: "night_brightness", selector: { number: { min: 10, max: 100, step: 10, mode: "slider", unit_of_measurement: "%" } } },
+        ] },
       ],
       computeLabel: (s) => ({ title: T.f_title, routes: T.f_routes, slow_after: T.f_slow, jam_after: T.f_jam,
-        show_beacons: T.f_beacons })[s.name],
+        show_beacons: T.f_beacons, style: T.f_style, brightness: T.f_bright, night_brightness: T.f_night })[s.name],
     };
   }
 }
