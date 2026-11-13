@@ -13,12 +13,14 @@
  * style: autoroute             # autoroute | sobre
  * brightness: 100              # intensité des LED (10 à 100 %)
  * night_brightness: 40         # intensité quand le soleil est couché (facultatif)
+ * tap_action: waze             # history | waze | google_maps (appui long = historique)
  * routes:
  *   - name: Bureau
  *     entity: sensor.waze_bureau
  *     normal: sensor.waze_bureau_normal   # capteur… ou un nombre de minutes (ex. 20)
+ *     destination: zone.bureau            # facultatif : sinon celle du capteur
  */
-const TLC_VERSION = "1.0.1";
+const TLC_VERSION = "1.1.0";
 const TLC_TAG = "trajet-ledcard";
 
 const TLC_I18N = {
@@ -29,6 +31,8 @@ const TLC_I18N = {
     f_normal: "Capteur de temps normal (facultatif)", f_normal_min: "ou temps normal fixe (min)",
     f_slow: "Ralenti à partir de (min de retard)", f_jam: "Bouchon à partir de (min de retard)", f_beacons: "Feux clignotants",
     f_style: "Style", f_bright: "Intensité des LED (%)", f_night: "Intensité la nuit (%, vide = pareil)",
+    f_tap: "Au toucher d'un trajet", f_dest: "Destination pour Waze / Maps (facultatif)",
+    open: "Ouvrir dans", long: "appui long : historique",
   },
   en: {
     title: "Travel time", min: "MIN", via: "VIA", km: "KM", ok: "FLOWING", slow: "SLOW", jam: "JAM",
@@ -37,6 +41,8 @@ const TLC_I18N = {
     f_normal: "Normal time sensor (optional)", f_normal_min: "or fixed normal time (min)",
     f_slow: "Slow from (min of delay)", f_jam: "Jam from (min of delay)", f_beacons: "Flashing beacons",
     f_style: "Style", f_bright: "LED brightness (%)", f_night: "Night brightness (%, empty = same)",
+    f_tap: "On route tap", f_dest: "Destination for Waze / Maps (optional)",
+    open: "Open in", long: "long press: history",
   },
 };
 const tlcLang = (hass) => ((hass && (hass.locale?.language || hass.language)) || "fr").startsWith("fr") ? "fr" : "en";
@@ -69,7 +75,7 @@ const TLC_STYLE = `
     -webkit-mask-image:radial-gradient(circle,#000 64%,transparent 72%); -webkit-mask-size:var(--dot,2.5px) var(--dot,2.5px);
     mask-image:radial-gradient(circle,#000 64%,transparent 72%); mask-size:var(--dot,2.5px) var(--dot,2.5px); }
   .g { filter:drop-shadow(0 0 1.5px currentColor) drop-shadow(0 0 3px color-mix(in srgb, currentColor 80%, transparent)) drop-shadow(0 0 7px color-mix(in srgb, currentColor 50%, transparent)); }
-  .route { padding:4px 0; cursor:pointer; }
+  .route { padding:4px 0; cursor:pointer; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; touch-action:manipulation; }
   .line { display:flex; align-items:baseline; justify-content:space-between; gap:8px; min-width:0; }
   .name { color:var(--amber); font-size:22px; white-space:nowrap; overflow:hidden; min-width:0; padding:9px; margin:-9px; }
   .time { color:var(--amber); font-size:32px; white-space:nowrap; --dot:2.8px; }
@@ -111,7 +117,7 @@ const tlcM = (txt) => `<span class="g"><span class="m">${txt}</span></span>`;
 
 class TrajetLedCard extends HTMLElement {
   setConfig(config) {
-    const c = { title: "", show_beacons: true, style: "autoroute", brightness: 100, routes: [], ...(config || {}) };
+    const c = { title: "", show_beacons: true, style: "autoroute", brightness: 100, tap_action: "history", routes: [], ...(config || {}) };
     if (!Array.isArray(c.routes)) c.routes = [];
     const th = Array.isArray(c.thresholds) ? c.thresholds : [];
     c.slow_after = Number(c.slow_after ?? th[0] ?? 5);
@@ -119,12 +125,23 @@ class TrajetLedCard extends HTMLElement {
     this._config = c;
     if (!this.shadowRoot) {
       this.attachShadow({ mode: "open" });
-      this.shadowRoot.addEventListener("click", (ev) => {
-        const el = ev.composedPath().find((n) => n.dataset && n.dataset.entity);
+      const root = this.shadowRoot;
+      const hit = (ev) => ev.composedPath().find((n) => n.dataset && n.dataset.idx !== undefined);
+      // Appui long (0,55 s) = historique ; appui court = action choisie (tap_action).
+      root.addEventListener("pointerdown", (ev) => {
+        const el = hit(ev);
         if (!el) return;
-        const e = new Event("hass-more-info", { bubbles: true, composed: true });
-        e.detail = { entityId: el.dataset.entity };
-        this.dispatchEvent(e);
+        clearTimeout(this._lp);
+        this._long = false;
+        this._lp = setTimeout(() => { this._long = true; this._history(el); }, 550);
+      });
+      for (const t of ["pointerup", "pointercancel"]) root.addEventListener(t, () => clearTimeout(this._lp));
+      root.addEventListener("contextmenu", (ev) => { if (hit(ev)) ev.preventDefault(); });
+      root.addEventListener("click", (ev) => {
+        const el = hit(ev);
+        if (!el) return;
+        if (this._long) { this._long = false; return; }
+        this._tap(el);
       });
     }
     this._sig = null;
@@ -141,6 +158,54 @@ class TrajetLedCard extends HTMLElement {
     if (sig === this._sig) return;
     this._sig = sig;
     this._render();
+  }
+
+  _app() {
+    const a = String(this._config.tap_action || "history").toLowerCase().replace(/[\s-]/g, "_");
+    return a === "waze" ? "waze" : ["google_maps", "google", "maps"].includes(a) ? "google_maps" : "history";
+  }
+
+  _history(el) {
+    const d = this._shown && this._shown[Number(el.dataset.idx)];
+    if (!d || !d.r.entity) return;
+    const e = new Event("hass-more-info", { bubbles: true, composed: true });
+    e.detail = { entityId: d.r.entity };
+    this.dispatchEvent(e);
+  }
+
+  _tap(el) {
+    const d = this._shown && this._shown[Number(el.dataset.idx)];
+    if (!d) return;
+    const app = this._app();
+    const url = app === "history" ? null : this._navUrl(d.r, d.st, app);
+    if (url) window.open(url, "_blank", "noopener");
+    else this._history(el);
+  }
+
+  // Destination : option « destination » du trajet, sinon attribut « destination » du capteur.
+  // Accepte une entité avec coordonnées (zone, person, device_tracker…), « lat,lon » ou une adresse.
+  _dest(r, st) {
+    const raw = r.destination || (st && st.attributes && st.attributes.destination);
+    if (!raw) return null;
+    const s = String(raw).trim();
+    const ent = this._hass && this._hass.states[s];
+    if (ent) {
+      const la = Number(ent.attributes.latitude), lo = Number(ent.attributes.longitude);
+      return Number.isFinite(la) && Number.isFinite(lo) ? { ll: `${la},${lo}` } : null;
+    }
+    const m = s.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+    if (m) return { ll: `${m[1]},${m[2]}` };
+    if (/^[a-z_]+\.[a-z0-9_]+$/i.test(s)) return null;
+    return { q: s };
+  }
+
+  _navUrl(r, st, app) {
+    const d = this._dest(r, st);
+    if (!d) return null;
+    if (app === "waze") {
+      return d.ll ? `https://waze.com/ul?ll=${d.ll}&navigate=yes` : `https://waze.com/ul?q=${encodeURIComponent(d.q)}&navigate=yes`;
+    }
+    return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${encodeURIComponent(d.ll || d.q)}`;
   }
 
   _normal(r, t) {
@@ -173,17 +238,19 @@ class TrajetLedCard extends HTMLElement {
     return parts.join(" · ");
   }
 
-  _row(d, T) {
+  _row(d, T, i) {
     const name = tlcEsc(d.r.name || (d.st && d.st.attributes.friendly_name) || d.r.entity || "?");
-    const ent = tlcEsc(d.r.entity || "");
     if (d.level === "na") {
-      return `<div class="route r-na" data-entity="${ent}"><div class="line">
+      return `<div class="route r-na" data-idx="${i}"><div class="line">
         <span class="name">${tlcM("&gt; " + name)}</span><span class="time">${tlcM(`--<small>${T.min}</small>`)}</span></div>
         <div class="line"><span class="via"></span><span class="state">${tlcM(T.na)}</span></div></div>`;
     }
     const state = d.level === "ok" ? T.ok : d.level === "slow" ? `${T.slow} +${d.delay}` : d.level === "jam" ? `${T.jam} +${d.delay}` : "";
-    const title = d.delay !== null ? `${T.delay} : ${d.delay} min` : "";
-    return `<div class="route r-${d.level}" data-entity="${ent}" title="${tlcEsc(title)}">
+    const app = this._app();
+    const nav = app !== "history" && this._navUrl(d.r, d.st, app)
+      ? `${T.open} ${app === "waze" ? "Waze" : "Google Maps"} · ${T.long}` : "";
+    const title = [d.delay !== null ? `${T.delay} : ${d.delay} min` : "", nav].filter(Boolean).join(" — ");
+    return `<div class="route r-${d.level}" data-idx="${i}" title="${tlcEsc(title)}">
       <div class="line"><span class="name">${tlcM("&gt; " + name)}</span>
         <span class="time">${tlcM(`${d.t}<small>${T.min}</small>`)}</span></div>
       <div class="line"><span class="via">${tlcM(tlcEsc(this._via(d, T)))}</span>
@@ -203,6 +270,7 @@ class TrajetLedCard extends HTMLElement {
     if (!this.shadowRoot || !this._config || !this._hass) return;
     const T = TLC_I18N[tlcLang(this._hass)];
     const data = this._config.routes.filter((r) => r && r.entity).map((r) => this._data(r));
+    this._shown = data;
     const worst = data.some((d) => d.level === "jam") ? "jam" : data.some((d) => d.level === "slow") ? "slow" : "ok";
     const last = data.map((d) => d.st && new Date(d.st.last_updated)).filter((x) => x && !isNaN(x)).sort((a, b) => b - a)[0];
     const loc = tlcLang(this._hass) === "fr" ? "fr-FR" : "en-GB";
@@ -227,7 +295,7 @@ class TrajetLedCard extends HTMLElement {
           <div class="hl">${sober ? `<ha-icon icon="mdi:car-clock"></ha-icon><span class="tt">${title}</span><span class="pulse"></span>` : title}</div>
           ${beacons && !sober ? '<span class="beacon l"></span><span class="beacon r"></span>' : ""}
           <div class="screen">
-            ${data.length ? data.map((d) => this._row(d, T)).join('<div class="sep"></div>') : `<div class="empty">${tlcEsc(T.none)}</div>`}
+            ${data.length ? data.map((d, i) => this._row(d, T, i)).join('<div class="sep"></div>') : `<div class="empty">${tlcEsc(T.none)}</div>`}
             <div class="foot">${tlcM(T.upd + " " + upd)}${src ? tlcM(tlcEsc(src)) : ""}</div>
           </div>
         </div>
@@ -252,6 +320,7 @@ class TrajetLedCard extends HTMLElement {
           name: { label: T.f_name, selector: { text: {} } },
           entity: { label: T.f_entity, required: true, selector: { entity: { domain: "sensor" } } },
           normal: { label: T.f_normal, selector: { entity: { domain: "sensor" } } },
+          destination: { label: T.f_dest, selector: { text: {} } },
         } } } },
         { type: "grid", name: "", schema: [
           { name: "slow_after", selector: { number: { min: 1, max: 120, mode: "box" } } },
@@ -263,10 +332,14 @@ class TrajetLedCard extends HTMLElement {
             { value: "autoroute", label: "Autoroute" }, { value: "sobre", label: "Sobre / Sober" }] } } },
           { name: "brightness", selector: { number: { min: 10, max: 100, step: 10, mode: "slider", unit_of_measurement: "%" } } },
           { name: "night_brightness", selector: { number: { min: 10, max: 100, step: 10, mode: "slider", unit_of_measurement: "%" } } },
+          { name: "tap_action", selector: { select: { mode: "dropdown", options: [
+            { value: "history", label: "Historique / History" }, { value: "waze", label: "Waze" },
+            { value: "google_maps", label: "Google Maps" }] } } },
         ] },
       ],
       computeLabel: (s) => ({ title: T.f_title, routes: T.f_routes, slow_after: T.f_slow, jam_after: T.f_jam,
-        show_beacons: T.f_beacons, style: T.f_style, brightness: T.f_bright, night_brightness: T.f_night })[s.name],
+        show_beacons: T.f_beacons, style: T.f_style, brightness: T.f_bright, night_brightness: T.f_night,
+        tap_action: T.f_tap })[s.name],
     };
   }
 }

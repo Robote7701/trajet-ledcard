@@ -48,7 +48,7 @@ Sans temps normal, la carte affiche le temps et la route, sans état du trafic.
 
 ![Intensité des LED](images/preview-brightness.png)
 
-Toucher un trajet ouvre l'historique de son temps. Les textes passent en anglais si Home Assistant est en anglais.
+Toucher un trajet ouvre l'historique de son temps, ou **lance l'itinéraire dans Waze ou Google Maps** avec `tap_action` (l'appui long garde alors l'historique). Pratique sur téléphone : un coup d'œil au panneau, un appui, et c'est parti. Les textes passent en anglais si Home Assistant est en anglais.
 
 ## 📦 Installation
 
@@ -79,10 +79,12 @@ jam_after: 15
 style: autoroute               # ou sobre
 brightness: 100                # intensité des LED (10 à 100 %)
 night_brightness: 40           # la nuit (facultatif)
+tap_action: waze               # history, waze ou google_maps
 routes:
   - name: Bureau
     entity: sensor.waze_bureau
     normal: sensor.waze_bureau_normal
+    destination: zone.bureau     # facultatif, pour Waze / Maps
   - name: École
     entity: sensor.waze_ecole
     normal: 9                    # temps normal fixe, en minutes
@@ -95,16 +97,21 @@ routes:
 | `routes[].name` | nom du capteur | nom affiché sur le panneau |
 | `routes[].entity` | — | capteur de temps de trajet (minutes) |
 | `routes[].normal` | — | capteur de temps normal, ou nombre de minutes |
+| `routes[].destination` | destination du capteur | où aller avec Waze / Maps : zone ou entité avec coordonnées (`zone.bureau`, `person.x`), `lat,lon` ou adresse |
 | `slow_after` | `5` | retard (min) à partir duquel c'est « ralenti » |
 | `jam_after` | `15` | retard (min) à partir duquel c'est « bouchon » |
 | `show_beacons` | `true` | afficher les feux clignotants (pastille en style sobre) |
 | `style` | `autoroute` | `autoroute` (boîtier métal) ou `sobre` (suit les couleurs du thème, clair ou sombre) |
 | `brightness` | `100` | intensité des LED, de 10 à 100 % |
 | `night_brightness` | — | intensité quand le soleil est couché (`sun.sun`) ; vide = même que `brightness` |
+| `tap_action` | `history` | au toucher d'un trajet : `history` (historique), `waze` ou `google_maps` (lance l'itinéraire ; appui long = historique) |
 
 ## ⚠️ Limites
 - Le temps vient du service choisi (Waze, Google…) ; Waze se met à jour toutes les 5 minutes environ.
 - Le style LED utilise une police à chasse fixe du système ; le rendu varie un peu selon l'appareil.
+
+## 👀 Voir aussi
+Pour un tableau classique de vos temps de trajet (nom, durée, distance, route), voir la **[Travel Time Card](https://github.com/ljmerza/travel-time-card)** de ljmerza, d'où vient l'idée d'ouvrir l'itinéraire dans Waze ou Google Maps.
 
 ## 🙏 Crédits
 Carte : robote7701 — licence MIT. Données de trajet : le service de votre capteur (Waze, Google…).
@@ -121,7 +128,7 @@ A Home Assistant card that shows travel times like a **motorway variable message
 One **travel time sensor in minutes** per route — **Waze Travel Time** (built-in, free, no key) is recommended; Google Maps Travel Time or any duration sensor also works. Optionally, a **normal time** to compute the delay: create a **Statistics** helper on the route sensor, characteristic **Minimum**, max age **7 days** — or give a fixed number of minutes.
 
 ### Entities used
-State of the route sensor (minutes); attributes `route`, `distance` and `attribution` when available; `normal` sensor or number for the delay. 🟢 `FLOWING` below `slow_after` · 🟠 `SLOW +X` · 🔴 `JAM +X` from `jam_after`. Tap a route to open its history. Labels follow the Home Assistant language (French or English).
+State of the route sensor (minutes); attributes `route`, `distance` and `attribution` when available; `normal` sensor or number for the delay. 🟢 `FLOWING` below `slow_after` · 🟠 `SLOW +X` · 🔴 `JAM +X` from `jam_after`. Tap a route to open its history, or set `tap_action: waze` / `google_maps` to start navigation (long press then opens the history); each route can set its own `destination` (zone, `lat,lon` or address). Labels follow the Home Assistant language (French or English).
 
 ### Install
 HACS → **⋮** → **Custom repositories** → `https://github.com/robote7701/trajet-ledcard`, category **Dashboard** → download **Trajet LED Card**, then reload the page. Manual: copy `trajet-ledcard.js` to `/config/www/` and add `/local/trajet-ledcard.js` as a *JavaScript module* resource.
@@ -136,6 +143,7 @@ show_beacons: true
 style: autoroute       # or sobre (follows your theme)
 brightness: 100        # LED brightness 10–100 %
 night_brightness: 40   # after sunset (optional)
+tap_action: waze       # history, waze or google_maps
 routes:
   - name: Office
     entity: sensor.waze_office
@@ -145,3 +153,5 @@ routes:
     normal: 9
 ```
 A visual editor is available. MIT licence.
+
+See also: [Travel Time Card](https://github.com/ljmerza/travel-time-card) by ljmerza, a classic table of travel times.
