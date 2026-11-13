@@ -18,7 +18,7 @@
  *     entity: sensor.waze_bureau
  *     normal: sensor.waze_bureau_normal   # capteur… ou un nombre de minutes (ex. 20)
  */
-const TLC_VERSION = "1.0.0";
+const TLC_VERSION = "1.0.1";
 const TLC_TAG = "trajet-ledcard";
 
 const TLC_I18N = {
